@@ -7,10 +7,10 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
 // --- Configuration ---
 const firebaseConfig = {
-    apiKey: "AIzaSyBapH9Dg67yNbs09ZdRiQAkuH7HTu9cbok",
+    apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
     authDomain: "supportkiosk-b43dd.firebaseapp.com",
     projectId: "supportkiosk-b43dd",
-    storageBucket: "supportkiosk-b43dd.firebasestorage.app",
+    storageBucket: "supportkiosk-b43dd.firestorageapp",
     messagingSenderId: "315490541997",
     appId: "1:315490541997:web:21c3aff2b67ea72ab94124"
 };
@@ -1130,7 +1130,7 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
 
     const getProblemSolvingResponse = async (history, asset, count, userName) => {
         const assetInfo = asset ? `The user is having a problem with their ${asset.Name} (Model: ${asset.Model?.Name || 'N/A'}).` : "The user has not specified a device.";
-        const prompt = `You are an expert IT support technician helping a user named ${userName}. Your goal is to gather information to create a useful support ticket. **CONTEXT:** - User: ${userName} - Device: ${assetInfo} - Conversation History:   ${history.map(h => `${h.role === 'user' ? userName : 'Assistant'}: ${h.parts[0].text}`).join('\n')} - Questions Asked So Far: ${count} **YOUR TASK (Follow these steps in order):** 1.  **Analyze Completeness:** Review the entire conversation history. Do you have a specific, actionable problem description? "It's broken" is not enough. "The screen is cracked" is enough. 2.  **Decision:** - **IF** the information is complete **OR** if you have already asked 2 questions (the "Questions Asked So far" is 2), you MUST proceed to Step 4 (Summarize).     - **ELSE** (the information is vague and you have asked fewer than 2 questions), proceed to Step 3 (Ask). 3.  **Ask:** Formulate ONE clarifying question. Do not repeat previous questions. The goal is to get a more specific detail. 4.  **Summarize:** Write a concise, one-paragraph summary of the issue based on ALL information gathered. **RESPONSE FORMAT:** You MUST respond with a valid JSON object. - If you decided to ask a question in Step 3, use this format:   {"status": "needs_clarification", "content": "Your question here."}  - If you decided to summarize in Step 4, use this format:   {"status": "complete", "content": "Your summary paragraph here.", "issuePath": "[Categorized Issue Path, e.g., Hardware > Screen Damage]"}`;
+        const prompt = `You are an expert IT support technician helping a user named ${userName}. Your goal is to gather information to create a useful support ticket. **CONTEXT:** - User: ${userName} - Device: ${assetInfo} - Conversation History:   ${history.map(h => `${h.role === 'user' ? userName : 'Assistant'}: ${h.parts[0].text}`).join('\n')} - Questions Asked So Far: ${count} **YOUR TASK (Follow these steps in order):** 1.  **Analyze Completeness:** Review the entire conversation history. Do you have a specific, actionable problem description? "It's broken" is not enough. "The screen is cracked" is enough. 2.  **Decision:** - **IF** the information is complete **OR** if you have already asked 2 questions (the "Questions Asked so far" is 2), you MUST proceed to Step 4 (Summarize).     - **ELSE** (the information is vague and you have asked fewer than 2 questions), proceed to Step 3 (Ask). 3.  **Ask:** Formulate ONE clarifying question. Do not repeat previous questions. The goal is to get a more specific detail. 4.  **Summarize:** Write a concise, one-paragraph summary of the issue based on ALL information gathered. **RESPONSE FORMAT:** You MUST respond with a valid JSON object. - If you decided to ask a question in Step 3, use this format:   {"status": "needs_clarification", "content": "Your question here."}  - If you decided to summarize in Step 4, use this format:   {"status": "complete", "content": "Your summary paragraph here.", "issuePath": "[Categorized Issue Path, e.g., Hardware > Screen Damage]"}`;
         const payload = {
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
