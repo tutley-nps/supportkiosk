@@ -22,7 +22,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Deploy to Firebase
-        uses: firebase/firebase-tools@v0
+        uses: firebase/firebase-tools@v1
         with:
           args: deploy --only hosting
         env:
