@@ -9,7 +9,7 @@
 //    `newTicketResponse.Item?.Id == null`, which correctly handles all numeric IDs, including zero.
 // 4. UI (Clarity): Renamed "Video" links and references in the admin dashboards to "Recording" to reflect the switch to audio.
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, onSnapshot, getDoc, query, where, getDocs, updateDoc, writeBatch, arrayUnion, arrayRemove, addDoc } from 'firebase/firestore';
@@ -263,6 +263,7 @@ const DamageWaiverFlow = ({ db, onExit }) => {
     const [resetSessionTimeoutRef, setResetSessionTimeoutRef] = useState(null);
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
 
     const recognitionRef = useRef(null);
     const finalTranscriptRef = useRef('');
@@ -332,6 +333,7 @@ const DamageWaiverFlow = ({ db, onExit }) => {
             setResetSessionTimeoutRef(timeout);
         } catch (error) {
             console.error("Error submitting waiver:", error);
+            setErrorMessage(error.message);
             setStatus('error');
         }
     };
@@ -452,7 +454,7 @@ const DamageWaiverFlow = ({ db, onExit }) => {
     if (status === 'error') {
          return (
             <div className="h-full flex items-center justify-center p-8 text-center">
-                 <h2 className="text-4xl font-bold text-yellow-400">There was an error submitting your form.</h2>
+                 <h2 className="text-4xl font-bold text-yellow-400">{errorMessage || "There was an error submitting your form."}</h2>
                  <p className="text-xl mt-4">Please try again or see a technician for help.</p>
                  <button onClick={onExit} className="mt-8 px-6 py-3 bg-cyan-600 rounded-lg font-bold">Return Home</button>
             </div>
@@ -664,7 +666,7 @@ const UserVerification = ({ onUserVerified, onExit }) => {
         return response.json();
     };
 
-    const findUserInIncidentIQ = async (searchTerm) => {
+    const findUserInIncidentIQ = useCallback(async (searchTerm) => {
         try {
             const users = await callProxy(`${FIREBASE_FUNCTIONS_URL}/api/findUser`, { searchTerm });
             return users || [];
@@ -672,7 +674,7 @@ const UserVerification = ({ onUserVerified, onExit }) => {
             console.error("Error calling /findUser endpoint:", searchError);
             return [];
         }
-    };
+    }, []);
 
     const processTranscript = async (transcript) => {
         if (!transcript) return;
@@ -731,7 +733,7 @@ const UserVerification = ({ onUserVerified, onExit }) => {
         }, 2500);
     };
     
-    const verifyUserByBarcode = async (searchTerm) => {
+    const verifyUserByBarcode = useCallback(async (searchTerm) => {
         if (html5QrCodeRef.current?.isScanning) {
              html5QrCodeRef.current.pause();
         }
@@ -752,7 +754,7 @@ const UserVerification = ({ onUserVerified, onExit }) => {
             setStatus('awaiting_name');
             if(html5QrCodeRef.current) html5QrCodeRef.current.resume();
         }
-    };
+    }, [findUserInIncidentIQ]);
     
     const verifyUserByName = async (name) => {
         setStatus('verifying');
@@ -856,7 +858,7 @@ const UserVerification = ({ onUserVerified, onExit }) => {
             }
             html5QrCodeRef.current = null;
         };
-    }, [status]); // This effect now correctly depends on the 'status' state.
+    }, [status, verifyUserByBarcode]);
 
 
     return (
@@ -900,6 +902,7 @@ const CheckInFlow = ({ onExit }) => {
     const [clarificationQuestion, setClarificationQuestion] = useState('');
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
     
     const mediaRecorderRef = useRef(null);
     const recordedChunksRef = useRef([]);
@@ -1115,7 +1118,7 @@ const CheckInFlow = ({ onExit }) => {
 
     const getProblemSolvingResponse = async (history, asset, count, userName) => {
         const assetInfo = asset ? `The user is having a problem with their ${asset.Name} (Model: ${asset.Model?.Name || 'N/A'}).` : "The user has not specified a device.";
-        const prompt = `You are an expert IT support technician helping a user named ${userName}. Your goal is to gather information to create a useful support ticket. **CONTEXT:** - User: ${userName} - Device: ${assetInfo} - Conversation History:   ${history.map(h => `${h.role === 'user' ? userName : 'Assistant'}: ${h.parts[0].text}`).join('\n')} - Questions Asked So Far: ${count} **YOUR TASK (Follow these steps in order):** 1.  **Analyze Completeness:** Review the entire conversation history. Do you have a specific, actionable problem description? "It's broken" is not enough. "The screen is cracked" is enough. 2.  **Decision:** - **IF** the information is complete **OR** if you have already asked 2 questions (the "Questions Asked So Far" is 2), you MUST proceed to Step 4 (Summarize).     - **ELSE** (the information is vague and you have asked fewer than 2 questions), proceed to Step 3 (Ask). 3.  **Ask:** Formulate ONE clarifying question. Do not repeat previous questions. The goal is to get a more specific detail. 4.  **Summarize:** Write a concise, one-paragraph summary of the issue based on ALL information gathered. **RESPONSE FORMAT:** You MUST respond with a valid JSON object. - If you decided to ask a question in Step 3, use this format:   \`{"status": "needs_clarification", "content": "Your question here."}\` - If you decided to summarize in Step 4, use this format:   \`{"status": "complete", "content": "Your summary paragraph here."}\``;
+        const prompt = `You are an expert IT support technician helping a user named ${userName}. Your goal is to gather information to create a useful support ticket. **CONTEXT:** - User: ${userName} - Device: ${assetInfo} - Conversation History:   ${history.map(h => `${h.role === 'user' ? userName : 'Assistant'}: ${h.parts[0].text}`).join('\n')} - Questions Asked So Far: ${count} **YOUR TASK (Follow these steps in order):** 1.  **Analyze Completeness:** Review the entire conversation history. Do you have a specific, actionable problem description? "It's broken" is not enough. "The screen is cracked" is enough. 2.  **Decision:** - **IF** the information is complete **OR** if you have already asked 2 questions (the "Questions Asked So far" is 2), you MUST proceed to Step 4 (Summarize).     - **ELSE** (the information is vague and you have asked fewer than 2 questions), proceed to Step 3 (Ask). 3.  **Ask:** Formulate ONE clarifying question. Do not repeat previous questions. The goal is to get a more specific detail. 4.  **Summarize:** Write a concise, one-paragraph summary of the issue based on ALL information gathered. **RESPONSE FORMAT:** You MUST respond with a valid JSON object. - If you decided to ask a question in Step 3, use this format:   \n\n{\"status\": \"needs_clarification\", \"content\": \"Your question here.\"}\\n - If you decided to summarize in Step 4, use this format:   \n\n{\"status\": \"complete\", \"content\": \"Your summary paragraph here.\"}\n`;
         const payload = {
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
@@ -1143,7 +1146,7 @@ const CheckInFlow = ({ onExit }) => {
         }
     };
     
-    const prepareTicket = () => {
+    const prepareTicket = useCallback(() => {
         if (!iiqUser || !problemDescription) return;
         setStatus('processing');
         const deviceName = identifiedAsset ? ` - ${identifiedAsset.Name}` : '';
@@ -1157,13 +1160,13 @@ const CheckInFlow = ({ onExit }) => {
         };
         setTicketDetails(details);
         setStatus('awaiting_confirmation');
-    };
+    }, [iiqUser, problemDescription, identifiedAsset]);
 
     useEffect(() => {
         if (problemDescription && iiqUser && !ticketDetails) {
             prepareTicket();
         }
-    }, [problemDescription, iiqUser, identifiedAsset, ticketDetails]);
+    }, [problemDescription, iiqUser, ticketDetails, prepareTicket]);
 
     const createTicket = async () => {
         if (!ticketDetails || !iiqUser) return;
@@ -1243,6 +1246,7 @@ const CheckInFlow = ({ onExit }) => {
                 startRecording();
             } catch (err) {
                 console.error("Media initialization failed in CheckInFlow:", err);
+                setErrorMessage(err.message);
                 setStatus('error');
             }
         };
@@ -1288,6 +1292,7 @@ const CheckInFlow = ({ onExit }) => {
                 onListenStop={handleListenStop}
                 ticketDetails={ticketDetails}
                 clarificationQuestion={clarificationQuestion}
+                errorMessage={errorMessage}
             />
         </div>
     );
@@ -1298,6 +1303,7 @@ const LeaveMessageFlow = ({ onExit }) => {
     const [status, setStatus] = useState('verifying_user');
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
     const [iiqUser, setIiqUser] = useState(null);
     const [messageSummary, setMessageSummary] = useState('');
     
@@ -1414,6 +1420,7 @@ const LeaveMessageFlow = ({ onExit }) => {
                 };
             } catch (err) {
                 console.error("Media initialization failed in LeaveMessageFlow:", err);
+                setErrorMessage(err.message);
                 setStatus('error');
             }
         };
@@ -1488,7 +1495,8 @@ const LeaveMessageFlow = ({ onExit }) => {
                         />
                     </>
                  )}
-                {status === 'processing_summary' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Generating summary...</h2> <LoadingSpinner/> </>}
+                {status === 'processing_summary' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Generating summary...</h2> <LoadingSpinner/> </>
+                }
                 {status === 'awaiting_summary_confirmation' && (
                     <>
                         <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Is this summary correct?</h2>
@@ -1499,7 +1507,8 @@ const LeaveMessageFlow = ({ onExit }) => {
                         </div>
                     </>
                 )}
-                {status === 'saving' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Sending your message...</h2> <LoadingSpinner/> </>}
+                {status === 'saving' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Sending your message...</h2> <LoadingSpinner/> </>
+                }
                 {status === 'done' && (
                      <div className="w-full">
                         <CheckCircleIcon className="w-20 h-20 mx-auto text-cyan-400" />
@@ -1507,7 +1516,7 @@ const LeaveMessageFlow = ({ onExit }) => {
                         <p className="text-lg mt-2">Your site tech has been notified. This screen will reset.</p>
                     </div>
                 )}
-                {status === 'error' && <p className="text-2xl text-yellow-300">Could not access camera/microphone.</p>}
+                {status === 'error' && <p className="text-2xl text-yellow-300">{errorMessage || "Could not access camera/microphone."}</p>}
             </div>
         </div>
     );
@@ -1701,7 +1710,7 @@ const AdminDashboard = ({ db, setView, userInfo }) => {
                         </thead>
                         <tbody>
                              {loading ? (
-                                <tr><td colSpan="5" className="text-center p-4">Loading messages...</td></tr>
+                                <tr><td colSpan="5" className="text-center p-4"><LoadingSpinner /></td></tr>
                             ) : filteredAndSortedData.map(msg => (
                                 <tr key={msg.id} className="border-b border-gray-700 hover:bg-gray-800/50">
                                     <td className="p-3">{new Date(msg.createdAt).toLocaleString()}</td>
