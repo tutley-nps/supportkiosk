@@ -1,3 +1,16 @@
+// --- Version: Phase 2, Rev 52 (Ticket Creation Hotfix 2) ---
+// This version provides the complete, uninterrupted code base and introduces several key improvements.
+// 1. FIX (Camera Mirroring): The scanner video preview is now flipped horizontally via CSS (`transform: scaleX(-1)`).
+//    This creates a more intuitive "mirror" effect for users without altering the raw data sent to the scanner library.
+// 2. FEATURE (Audio Recording): The Check-In and Leave Message flows now request microphone-only permissions and
+//    record audio (`audio/webm`) instead of video, reducing file sizes and focusing on the required functionality.
+// 3. FIX (Ticket Creation Error): Corrected the logic in the `createTicket` function again with a more robust check.
+//    The previous check was still failing. The new check `typeof newTicketResponse.Item.Id !== 'number'` ensures
+//    that any numeric ID, including 0, is treated as valid, resolving the creation failure.
+// 4. FIX (Audio Recording in Check-In): Added logic to `handleListenStart` and `handleListenStop` in the `CheckInFlow`
+//    to properly resume and pause the MediaRecorder, ensuring the user's problem description is actually recorded.
+// 5. UI (Clarity): Renamed "Video" links and references in the admin dashboards to "Recording" to reflect the switch to audio.
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -43,30 +56,6 @@ export default function App() {
     const [authAttempted, setAuthAttempted] = useState(false);
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
-    const [cameraDeviceId, setCameraDeviceId] = useState(null);
-
-    useEffect(() => {
-        // Pre-load camera device ID to speed up scanner initialization
-        const getCameraPermission = async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                const videoTracks = stream.getVideoTracks();
-                if (videoTracks.length > 0) {
-                    // Get the device ID of the first video track
-                    const deviceId = videoTracks[0].getSettings().deviceId;
-                    if (deviceId) {
-                        setCameraDeviceId(deviceId);
-                    }
-                }
-                // Stop the stream tracks as we only needed them for permissions and device ID
-                videoTracks.forEach(track => track.stop());
-            } catch (err) {
-                console.error("Error pre-loading camera:", err);
-                // The user will be prompted for camera access later if it failed here.
-            }
-        };
-        getCameraPermission();
-    }, []);
 
     useEffect(() => {
         try {
@@ -175,9 +164,9 @@ export default function App() {
         }
         switch (kioskFlow) {
             case 'home': return <KioskHome setKioskFlow={setKioskFlow} />;
-            case 'checkin': return <CheckInFlow onExit={resetToKioskHome} cameraDeviceId={cameraDeviceId} />;
-            case 'message': return <LeaveMessageFlow onExit={resetToKioskHome} cameraDeviceId={cameraDeviceId} />;
-            case 'waiver': return <DamageWaiverFlow db={db} onExit={resetToKioskHome} cameraDeviceId={cameraDeviceId} />;
+            case 'checkin': return <CheckInFlow onExit={resetToKioskHome} />;
+            case 'message': return <LeaveMessageFlow onExit={resetToKioskHome} />;
+            case 'waiver': return <DamageWaiverFlow db={db} onExit={resetToKioskHome} />;
             default: return <KioskHome setKioskFlow={setKioskFlow} />;
         }
     };
@@ -261,7 +250,7 @@ const KioskButton = ({ title, description, onClick }) => (
     </button>
 );
 
-const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
+const DamageWaiverFlow = ({ db, onExit }) => {
     const [status, setStatus] = useState('verifying_user');
     const [iiqUser, setIiqUser] = useState(null);
     const [userAssets, setUserAssets] = useState([]);
@@ -276,7 +265,6 @@ const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
     const [resetSessionTimeoutRef, setResetSessionTimeoutRef] = useState(null);
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
-    const [errorMessage, setErrorMessage] = useState('');
 
     const recognitionRef = useRef(null);
     const finalTranscriptRef = useRef('');
@@ -289,8 +277,7 @@ const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
             body: JSON.stringify(body)
         });
         if (!response.ok) { throw new Error(`API Error: ${response.status}`); }
-        const text = await response.text();
-        return text ? JSON.parse(text) : {};
+        return response.json();
     };
 
     const getUserAssets = async (UserId) => {
@@ -347,7 +334,6 @@ const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
             setResetSessionTimeoutRef(timeout);
         } catch (error) {
             console.error("Error submitting waiver:", error);
-            setErrorMessage(error.message);
             setStatus('error');
         }
     };
@@ -426,7 +412,7 @@ const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
     }, [resetSessionTimeoutRef]);
 
     if (status === 'verifying_user') {
-        return <UserVerification onUserVerified={handleUserVerified} onExit={onExit} cameraDeviceId={cameraDeviceId} />;
+        return <UserVerification onUserVerified={handleUserVerified} onExit={onExit} />;
     }
     
     if (status === 'processing' || status === 'submitting') {
@@ -468,7 +454,7 @@ const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
     if (status === 'error') {
          return (
             <div className="h-full flex items-center justify-center p-8 text-center">
-                 <h2 className="text-4xl font-bold text-yellow-400">{errorMessage || "There was an error submitting your form."}</h2>
+                 <h2 className="text-4xl font-bold text-yellow-400">There was an error submitting your form.</h2>
                  <p className="text-xl mt-4">Please try again or see a technician for help.</p>
                  <button onClick={onExit} className="mt-8 px-6 py-3 bg-cyan-600 rounded-lg font-bold">Return Home</button>
             </div>
@@ -514,8 +500,8 @@ const DamageWaiverFlow = ({ db, onExit, cameraDeviceId }) => {
                     </div>
 
                     <div className="flex justify-end gap-4 pt-4">
-                        <button type="button" onClick={onExit} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded-md">Cancel</button>
-                        <button type="submit" className="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-md font-semibold">Submit Waiver</button>
+                        <button type="button" onClick={onExit} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg font-bold">Cancel</button>
+                        <button type="submit" className="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-bold">Submit Waiver</button>
                     </div>
                 </form>
             </div>
@@ -547,8 +533,8 @@ const LiveStatusDisplay = ({ status, interimTranscript, visitorName, iiqUser, pr
     if (status === 'awaiting_name') message = "I couldn't locate you. Please hold the button and say your name.";
     if (status === 'awaiting_selection') message = "I found a few people. Please tap your name to continue.";
     if (status === 'awaiting_asset_selection') message = `Hi, ${visitorName}. Which device are you having an issue with?`;
-    if (status === 'awaiting_id_confirmation') message = `Thanks, ${potentialUser.Name}. Is that correct?`;
-    if (status === 'awaiting_barcode_confirmation') message = `I see you're ${potentialUser.Name}. Is that correct?`;
+    if (status === 'awaiting_id_confirmation' && potentialUser) message = `Thanks, ${potentialUser.Name}. Is that correct?`;
+    if (status === 'awaiting_barcode_confirmation' && potentialUser) message = `I see you're ${potentialUser.Name}. Is that correct?`;
     if (status === 'processing' || status === 'verifying') message = "One moment...";
     if (status === 'awaiting_problem') message = `Thanks, ${visitorName}. Please hold the button and describe your issue.`;
     if (status === 'awaiting_clarification') message = clarificationQuestion || "Let me ask a quick follow-up...";
@@ -607,6 +593,20 @@ const LiveStatusDisplay = ({ status, interimTranscript, visitorName, iiqUser, pr
                 </div>
             )}
 
+            {status === 'awaiting_asset_selection' && userAssets && (
+                 <>
+                    <div className="max-h-64 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-3 mt-4 p-2">
+                        {userAssets.map(asset => (
+                            <button key={asset.AssetId} onClick={() => onAssetSelect(asset)} className="bg-cyan-600/50 hover:bg-cyan-500/80 text-white font-bold py-3 px-4 rounded-lg text-left no-select">
+                                <p className="text-base">{asset.Name}</p>
+                                <p className="text-xs text-cyan-200">Tag: {asset.AssetTag || 'N/A'}</p>
+                            </button>
+                        ))}
+                         <button onClick={() => onAssetSelect(null)} className="bg-gray-600/50 hover:bg-gray-500/80 text-white font-bold py-3 px-4 rounded-lg no-select">It's something else</button>
+                    </div>
+                 </>
+            )}
+
             {showTicketDetails && ticketDetails && iiqUser && (
                 <div className="text-left space-y-3 text-xl mt-4">
                     <p><strong className="text-cyan-400">Name:</strong> {iiqUser.Name}</p>
@@ -637,7 +637,7 @@ const ConfirmationDisplay = ({ ticket }) => (
 
 // --- KIOSK FLOW COMPONENTS ---
 
-const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
+const UserVerification = ({ onUserVerified, onExit }) => {
     const [status, setStatus] = useState('initializing');
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
@@ -652,54 +652,38 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
     const finalTranscriptRef = useRef('');
     const silenceTimeoutRef = useRef(null);
 
-    
+    const callProxy = async (url, body) => {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Proxy call to ${url} failed:`, errorText);
+            throw new Error(`API Error: ${response.status}`);
+        }
+        return response.json();
+    };
 
-    const findUserInIncidentIQ = React.useCallback(async (searchTerm) => {
+    const findUserInIncidentIQ = async (searchTerm) => {
         try {
-                        const response = await fetch(`${FIREBASE_FUNCTIONS_URL}/api/findUser`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ searchTerm })
-            });
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error(`Direct call to /api/findUser failed:`, errorText);
-                throw new Error(`API Error: ${response.status}`);
-            }
-            const users = await response.json();
+            const users = await callProxy(`${FIREBASE_FUNCTIONS_URL}/api/findUser`, { searchTerm });
             return users || [];
         } catch (searchError) {
             console.error("Error calling /findUser endpoint:", searchError);
             return [];
         }
-    }, []);
+    };
 
-    const verifyUserByName = React.useCallback(async (name) => {
-        setStatus('verifying');
-        const users = await findUserInIncidentIQ(name);
-        if (users && users.length > 0) {
-            setErrorMessage('');
-            if (users.length > 1) {
-                setPotentialUsers(users);
-                setStatus('awaiting_selection');
-            } else {
-                setPotentialUser(users[0]);
-                setStatus('awaiting_id_confirmation');
-            }
-        } else {
-            setErrorMessage(`I couldn't find anyone named "${name}". Please try spelling it out.`);
-            setStatus('awaiting_name');
-        }
-    }, [findUserInIncidentIQ, setErrorMessage, setPotentialUsers, setStatus, setPotentialUser]);
-
-    const processTranscript = React.useCallback(async (transcript) => {
+    const processTranscript = async (transcript) => {
         if (!transcript) return;
         const cancelWords = ['cancel', 'start over', 'never mind', 'delete'];
         if (cancelWords.some(word => transcript.toLowerCase().includes(word))) {
             return onExit();
         }
         await verifyUserByName(transcript);
-    }, [onExit, verifyUserByName]);
+    };
     
     const handleListenStart = (event) => {
         event.preventDefault();
@@ -736,7 +720,7 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
         recognitionRef.current = recognition;
     };
 
-    const handleListenStop = React.useCallback((event) => {
+    const handleListenStop = (event) => {
         event.preventDefault();
         if (recognitionRef.current) {
             recognitionRef.current.stop();
@@ -747,9 +731,9 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
                 finalTranscriptRef.current = '';
             }
         }, 2500);
-    }, [processTranscript]);
+    };
     
-    const verifyUserByBarcode = React.useCallback(async (searchTerm) => {
+    const verifyUserByBarcode = async (searchTerm) => {
         if (html5QrCodeRef.current?.isScanning) {
              html5QrCodeRef.current.pause();
         }
@@ -770,9 +754,27 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
             setStatus('awaiting_name');
             if(html5QrCodeRef.current) html5QrCodeRef.current.resume();
         }
-    }, [findUserInIncidentIQ, setErrorMessage, setPotentialUser, setStatus, setPotentialUsers]);
+    };
     
-    const handleConfirmation = React.useCallback((isConfirmed) => {
+    const verifyUserByName = async (name) => {
+        setStatus('verifying');
+        const users = await findUserInIncidentIQ(name);
+        if (users && users.length > 0) {
+            setErrorMessage('');
+            if (users.length > 1) {
+                setPotentialUsers(users);
+                setStatus('awaiting_selection');
+            } else {
+                setPotentialUser(users[0]);
+                setStatus('awaiting_id_confirmation');
+            }
+        } else {
+            setErrorMessage(`I couldn't find anyone named "${name}". Please try spelling it out.`);
+            setStatus('awaiting_name');
+        }
+    };
+
+    const handleConfirmation = (isConfirmed) => {
         if (isConfirmed) {
             onUserVerified(potentialUser);
         } else {
@@ -781,7 +783,7 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
             setStatus('awaiting_name');
             if(html5QrCodeRef.current) html5QrCodeRef.current.resume();
         }
-    }, [onUserVerified, potentialUser]);
+    };
     
     // This effect transitions the component to the scanning state after the initial render.
     useEffect(() => {
@@ -856,7 +858,7 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
             }
             html5QrCodeRef.current = null;
         };
-    }, [status, verifyUserByBarcode, cameraDeviceId]);
+    }, [status]); // This effect now correctly depends on the 'status' state.
 
 
     return (
@@ -886,11 +888,10 @@ const UserVerification = ({ onUserVerified, onExit, cameraDeviceId }) => {
 };
 
 
-const CheckInFlow = ({ onExit, cameraDeviceId }) => {
+const CheckInFlow = ({ onExit }) => {
     const [status, setStatus] = useState('verifying_user');
     const [visitorName, setVisitorName] = useState('');
     const [problemDescription, setProblemDescription] = useState('');
-    const [issuePath, setIssuePath] = useState('');
     const [iiqUser, setIiqUser] = useState(null);
     const [ticketDetails, setTicketDetails] = useState(null);
     const [finalTicket, setFinalTicket] = useState(null);
@@ -901,7 +902,6 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
     const [clarificationQuestion, setClarificationQuestion] = useState('');
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
-    const [errorMessage, setErrorMessage] = useState('');
     
     const mediaRecorderRef = useRef(null);
     const recordedChunksRef = useRef([]);
@@ -928,8 +928,7 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
             console.error(`Proxy call to ${url} failed:`, errorText);
             throw new Error(`API Error: ${response.status}`);
         }
-        const text = await response.text();
-        return text ? JSON.parse(text) : {};
+        return response.json();
     };
 
     const blobToBase64 = (blob) => {
@@ -1007,6 +1006,10 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
     
     const handleListenStart = (event) => {
         event.preventDefault();
+        // FIX: Resume the media recorder if it's paused.
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+            mediaRecorderRef.current.resume();
+        }
         finalTranscriptRef.current = '';
         if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
 
@@ -1042,7 +1045,8 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
 
     const handleListenStop = (event) => {
         event.preventDefault();
-        if (mediaRecorderRef.current?.state === 'recording') {
+        // FIX: Pause the media recorder when the user stops speaking.
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
             mediaRecorderRef.current.pause();
         }
         if (recognitionRef.current) {
@@ -1069,56 +1073,6 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
     const handleAssetSelection = (asset) => { setIdentifiedAsset(asset); setStatus('awaiting_problem'); };
     const handleRedoProblem = () => { setProblemDescription(''); setTicketDetails(null); setConversationHistory([]); setClarificationCount(0); setStatus('awaiting_problem'); };
 
-    async function createIncidentIQTicket(ticketData) {
-        try {
-            const responseData = await callProxy(INCIDENTIQ_PROXY_URL, {
-                path: '/api/v1.0/tickets/new',
-                method: 'POST',
-                body: ticketData
-            });
-            // The ticket ID is at the top level of the response, while the details are in `Item`.
-            if (responseData?.Id == null) {
-                 throw new Error("Ticket creation failed to return a valid ID.");
-            }
-            return {
-                success: true,
-                ticketId: responseData.Id, // Use top-level Id
-                ticketNumber: responseData.Item?.TicketNumber,
-                title: responseData.Item?.Subject,
-                visitorName: responseData.Item?.For?.Name,
-            };
-        } catch (error) {
-            console.error("Error in createIncidentIQTicket:", error);
-            return { success: false, errorMessage: error.message };
-        }
-    }
-
-    
-
-    async function logTicketToFirestore(ticket) {
-        const db = getFirestore();
-        if (!db || !iiqUser) return;
-        try {
-            const { Subject, IssueDescription, ForId, LocationId, TicketId, ticketNumber, videoLink } = ticket;
-            await addDoc(collection(db, "tickets"), {
-                createdAt: new Date().toISOString(),
-                status: "Open",
-                requestorName: iiqUser.Name,
-                schoolId: iiqUser.SchoolIdNumber,
-                userLocation: iiqUser.Location?.Name,
-                userId: ForId,
-                locationId: LocationId,
-                device: identifiedAsset ? identifiedAsset.Name : 'N/A',
-                assetTag: identifiedAsset ? identifiedAsset.AssetTag : 'N/A',
-                problemDescription: IssueDescription,
-                videoLink: videoLink || '#',
-                incidentIqTicketId: TicketId,
-                incidentIqTicketNumber: ticketNumber,
-                subject: Subject,
-            });
-        } catch (e) { console.error("Firestore log error: ", e); }
-    }
-
     const startClarificationProcess = async (initialProblem) => {
         setStatus('processing');
         const initialHistory = [{ role: 'user', parts: [{ text: initialProblem }] }];
@@ -1130,7 +1084,7 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
 
     const getProblemSolvingResponse = async (history, asset, count, userName) => {
         const assetInfo = asset ? `The user is having a problem with their ${asset.Name} (Model: ${asset.Model?.Name || 'N/A'}).` : "The user has not specified a device.";
-        const prompt = `You are an expert IT support technician helping a user named ${userName}. Your goal is to gather information to create a useful support ticket. **CONTEXT:** - User: ${userName} - Device: ${assetInfo} - Conversation History:   ${history.map(h => `${h.role === 'user' ? userName : 'Assistant'}: ${h.parts[0].text}`).join('\n')} - Questions Asked So Far: ${count} **YOUR TASK (Follow these steps in order):** 1.  **Analyze Completeness:** Review the entire conversation history. Do you have a specific, actionable problem description? "It's broken" is not enough. "The screen is cracked" is enough. 2.  **Decision:** - **IF** the information is complete **OR** if you have already asked 2 questions (the "Questions Asked So far" is 2), you MUST proceed to Step 4 (Summarize).     - **ELSE** (the information is vague and you have asked fewer than 2 questions), proceed to Step 3 (Ask). 3.  **Ask:** Formulate ONE clarifying question. Do not repeat previous questions. The goal is to get a more specific detail. 4.  **Summarize:** Write a concise, one-paragraph summary of the issue based on ALL information gathered. **RESPONSE FORMAT:** You MUST respond with a valid JSON object. - If you decided to ask a question in Step 3, use this format:   {"status": "needs_clarification", "content": "Your question here."}  - If you decided to summarize in Step 4, use this format:   {"status": "complete", "content": "Your summary paragraph here.", "issuePath": "[Categorized Issue Path, e.g., Hardware > Screen Damage]"}`;
+        const prompt = `You are an expert IT support technician helping a user named ${userName}. Your goal is to gather information to create a useful support ticket. **CONTEXT:** - User: ${userName} - Device: ${assetInfo} - Conversation History:   ${history.map(h => `${h.role === 'user' ? userName : 'Assistant'}: ${h.parts[0].text}`).join('\n')} - Questions Asked So Far: ${count} **YOUR TASK (Follow these steps in order):** 1.  **Analyze Completeness:** Review the entire conversation history. Do you have a specific, actionable problem description? "It's broken" is not enough. "The screen is cracked" is enough. 2.  **Decision:** - **IF** the information is complete **OR** if you have already asked 2 questions (the "Questions Asked So Far" is 2), you MUST proceed to Step 4 (Summarize).     - **ELSE** (the information is vague and you have asked fewer than 2 questions), proceed to Step 3 (Ask). 3.  **Ask:** Formulate ONE clarifying question. Do not repeat previous questions. The goal is to get a more specific detail. 4.  **Summarize:** Write a concise, one-paragraph summary of the issue based on ALL information gathered. **RESPONSE FORMAT:** You MUST respond with a valid JSON object. - If you decided to ask a question in Step 3, use this format:   \`{"status": "needs_clarification", "content": "Your question here."}\` - If you decided to summarize in Step 4, use this format:   \`{"status": "complete", "content": "Your summary paragraph here."}\``;
         const payload = {
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
@@ -1155,30 +1109,15 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
             setStatus('awaiting_clarification');
         } else { // status is 'complete'
             setProblemDescription(result.content);
-            if (result.issuePath) {
-                setIssuePath(result.issuePath);
-            }
         }
     };
     
-    const prepareTicket = React.useCallback(() => {
+    const prepareTicket = () => {
         if (!iiqUser || !problemDescription) return;
         setStatus('processing');
-        
-        const locationName = iiqUser.Location?.Name || 'Unknown Location';
-        let subject = '';
-        if (identifiedAsset && issuePath) {
-            subject = `${identifiedAsset.Name} > ${issuePath}`;
-        } else if (issuePath) {
-            subject = issuePath;
-        } else {
-            subject = identifiedAsset 
-                ? `${identifiedAsset.Name} - ${locationName}`
-                : `Walk Up Support - ${locationName}`;
-        }
-
+        const deviceName = identifiedAsset ? ` - ${identifiedAsset.Name}` : '';
         const details = {
-            Subject: subject,
+            Subject: `Walk Up - ${iiqUser.Location?.Name || 'Unknown Location'}${deviceName}`,
             IssueDescription: problemDescription,
             ForId: iiqUser.UserId,
             LocationId: iiqUser.LocationId,
@@ -1187,42 +1126,41 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
         };
         setTicketDetails(details);
         setStatus('awaiting_confirmation');
-    }, [iiqUser, problemDescription, identifiedAsset, issuePath]);
+    };
 
     useEffect(() => {
         if (problemDescription && iiqUser && !ticketDetails) {
             prepareTicket();
         }
-    }, [problemDescription, iiqUser, ticketDetails, prepareTicket]);
+    }, [problemDescription, iiqUser, identifiedAsset, ticketDetails]);
 
     const createTicket = async () => {
-        if (!ticketDetails || !iiqUser) return;
+        if (!ticketDetails) return;
         setStatus('processing');
         try {
-            const videoLink = await stopRecording(); // No ticketNumber yet
-
-            const ticketDetailsWithVideo = {
-                ...ticketDetails,
-                IssueDescription: `${ticketDetails.IssueDescription}\n\nAudio Submission: ${videoLink || 'Not available.'}`
-            };
-
-            const newTicket = await createIncidentIQTicket(ticketDetailsWithVideo);
-            if (!newTicket.success) {
-                setErrorMessage(newTicket.errorMessage || "Failed to create ticket in Incident IQ.");
-                setStatus('error');
-                setTimeout(resetSession, 10000);
-                return;
+            const newTicketResponse = await callProxy(INCIDENTIQ_PROXY_URL, { path: '/api/v1.0/tickets/new', method: 'POST', body: ticketDetails });
+            
+            // FIX: This is the robust check from the working version.
+            if (!newTicketResponse || !newTicketResponse.Item || typeof newTicketResponse.Item.Id !== 'number') {
+                console.error("Ticket creation failed. API Response:", newTicketResponse);
+                const errorMessage = newTicketResponse?.Error?.Message || "Ticket creation failed to return a valid numeric ID.";
+                throw new Error(errorMessage);
             }
+            const newTicket = newTicketResponse;
 
-            await logTicketToFirestore({ ...ticketDetailsWithVideo, TicketId: newTicket.ticketId, ticketNumber: newTicket.ticketNumber, videoLink: videoLink || '#' });
-            setFinalTicket(newTicket);
+            const audioLink = await stopRecording(newTicket.Item.TicketNumber);
+
+            const finalTicketDetails = {
+                TicketId: newTicket.Item.Id,
+                IssueDescription: `${ticketDetails.IssueDescription}\n\nAudio Submission: ${audioLink || 'Not available.'}`
+            };
+            await callProxy(INCIDENTIQ_PROXY_URL, { path: `/api/v1.0/tickets/${finalTicketDetails.TicketId}`, method: 'POST', body: finalTicketDetails });
+
+            setFinalTicket({ ticketNumber: newTicket.Item.TicketNumber, visitorName: iiqUser.Name });
             setStatus('confirming');
-            if (resetSessionTimeoutRef.current) clearTimeout(resetSessionTimeoutRef.current);
             resetSessionTimeoutRef.current = setTimeout(resetSession, 10000);
-
         } catch (error) {
-            console.error("A critical error occurred during the ticket process.", error)
-            setErrorMessage("A critical error occurred. Please try again.");
+            console.error("A critical error occurred during the ticket process.", error);
             setStatus('error');
             setTimeout(resetSession, 10000);
         }
@@ -1271,7 +1209,6 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
                 startRecording();
             } catch (err) {
                 console.error("Media initialization failed in CheckInFlow:", err);
-                setErrorMessage(err.message);
                 setStatus('error');
             }
         };
@@ -1286,7 +1223,7 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
     }, []);
 
     if (status === 'verifying_user') {
-        return <UserVerification onUserVerified={handleUserVerified} onExit={onExit} cameraDeviceId={cameraDeviceId} />;
+        return <UserVerification onUserVerified={handleUserVerified} onExit={onExit} />;
     }
 
     if (status === 'confirming' && finalTicket) {
@@ -1309,7 +1246,6 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
                 problemDescription={problemDescription}
                 identifiedAsset={identifiedAsset}
                 isListening={isListening}
-                errorMessage={errorMessage}
                 userAssets={userAssets}
                 onAssetSelect={handleAssetSelection}
                 onCreateTicket={createTicket}
@@ -1324,11 +1260,10 @@ const CheckInFlow = ({ onExit, cameraDeviceId }) => {
 };
 
 
-const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
+const LeaveMessageFlow = ({ onExit }) => {
     const [status, setStatus] = useState('verifying_user');
     const [isListening, setIsListening] = useState(false);
     const [interimTranscript, setInterimTranscript] = useState('');
-    const [errorMessage, setErrorMessage] = useState('');
     const [iiqUser, setIiqUser] = useState(null);
     const [messageSummary, setMessageSummary] = useState('');
     
@@ -1347,8 +1282,7 @@ const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
             body: JSON.stringify(body)
         });
         if (!response.ok) { throw new Error(`API Error: ${response.status}`); }
-        const text = await response.text();
-        return text ? JSON.parse(text) : {};
+        return response.json();
     };
     
     const blobToBase64 = (blob) => {
@@ -1446,7 +1380,6 @@ const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
                 };
             } catch (err) {
                 console.error("Media initialization failed in LeaveMessageFlow:", err);
-                setErrorMessage(err.message);
                 setStatus('error');
             }
         };
@@ -1493,7 +1426,7 @@ const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
     };
 
     if (status === 'verifying_user') {
-        return <UserVerification onUserVerified={(user) => { setIiqUser(user); setStatus('awaiting_message'); }} onExit={onExit} cameraDeviceId={cameraDeviceId} />;
+        return <UserVerification onUserVerified={(user) => { setIiqUser(user); setStatus('awaiting_message'); }} onExit={onExit} />;
     }
 
     return (
@@ -1521,8 +1454,7 @@ const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
                         />
                     </>
                  )}
-                {status === 'processing_summary' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Generating summary...</h2> <LoadingSpinner/> </>
-                }
+                {status === 'processing_summary' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Generating summary...</h2> <LoadingSpinner/> </>}
                 {status === 'awaiting_summary_confirmation' && (
                     <>
                         <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Is this summary correct?</h2>
@@ -1533,8 +1465,7 @@ const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
                         </div>
                     </>
                 )}
-                {status === 'saving' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Sending your message...</h2> <LoadingSpinner/> </>
-                }
+                {status === 'saving' && <> <h2 className="text-3xl font-semibold text-cyan-400 mb-4">Sending your message...</h2> <LoadingSpinner/> </>}
                 {status === 'done' && (
                      <div className="w-full">
                         <CheckCircleIcon className="w-20 h-20 mx-auto text-cyan-400" />
@@ -1542,7 +1473,7 @@ const LeaveMessageFlow = ({ onExit, cameraDeviceId }) => {
                         <p className="text-lg mt-2">Your site tech has been notified. This screen will reset.</p>
                     </div>
                 )}
-                {status === 'error' && <p className="text-2xl text-yellow-300">{errorMessage || "Could not access camera/microphone."}</p>}
+                {status === 'error' && <p className="text-2xl text-yellow-300">Could not access camera/microphone.</p>}
             </div>
         </div>
     );
@@ -1736,7 +1667,7 @@ const AdminDashboard = ({ db, setView, userInfo }) => {
                         </thead>
                         <tbody>
                              {loading ? (
-                                <tr><td colSpan="5" className="text-center p-4"><LoadingSpinner /></td></tr>
+                                <tr><td colSpan="5" className="text-center p-4">Loading messages...</td></tr>
                             ) : filteredAndSortedData.map(msg => (
                                 <tr key={msg.id} className="border-b border-gray-700 hover:bg-gray-800/50">
                                     <td className="p-3">{new Date(msg.createdAt).toLocaleString()}</td>
